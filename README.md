@@ -12,10 +12,10 @@ Shuffle all files under `music/` (excluding dirs and files starting with `+`, `.
 0pen.ml music/ --music
 ```
 
-Play all files under `foo fighters/` once, in alphabetical / "file-manager" order, i.e., in lexical order except `9.mp3` comes before `10.mp3`:
+Play all files under `foo_fighters/` once, in alphabetical / "file-manager" order, i.e., in lexical order except `9.mp3` comes before `10.mp3`:
 
 ```shell
-0pen.ml foo\ fighters/ --alpha
+0pen.ml foo_fighters/ --alpha
 ```
 
 Play all files under `comedy/`, including dirs and files starting with `+`, picking them indefinitely at random. Each subdirectory's probability of being picked is proportional to the s**q**uare root of the total number of (leaf) files it contains. As an exception, directories named in `ALL_CAPS` or starting with `@` have their children treated as if they were direct children of the parent directory.
@@ -24,10 +24,10 @@ Play all files under `comedy/`, including dirs and files starting with `+`, pick
 0pen.ml comedy/ -+ --pick q
 ```
 
-First play `toto/africa.mp3`, then randomly play files from `foo fighters/` and `toto/`. When picking files, both top-level directories `foo fighters/` and `toto/` are picked as often as a single file (**c**onstant weight, so here it's 50 % Foo Fighters and 50 % Toto), then all further levels of subdirectories weigh as much as the total number of files they contain (**l**inear weight):
+First play `toto/africa.mp3`, then randomly play files from `foo_fighters/` and `toto/`. When picking files, both top-level directories `foo_fighters/` and `toto/` are picked as often as a single file (**c**onstant weight, so here it's 50 % `foo_fighters` and 50 % `toto`), then all further levels of subdirectories weigh as much as the total number of files they contain (**l**inear weight):
 
 ```shell
-0pen.ml foo\ fighters/ toto/ --pick c/l --first toto/africa.mp3
+0pen.ml foo_fighters/ toto/ --pick c/l --first toto/africa.mp3
 ```
 
 Find photos modified (or taken) less than a year ago to open them as a full-screen slideshow. With each directory sorted **a**lphabetically, move by the **g**olden angle 1-1/φ ≈ 0.38 of the length of the list between picking files, which maximizes diversity. Pick series of 3 consecutive photos if possible (Files are considered consecutive if they differ only by a single number. For instance, `IMG_101.jpg` and `IMG_105.jpg` are consecutive but `IMG_106_Cat.jpg` isn't.):
