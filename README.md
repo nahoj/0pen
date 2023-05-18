@@ -57,7 +57,9 @@ opam switch create 4.14.1
 opam install 'camomile<2' ocamlfind dolog magic-mime ubase
 
 # and then, for instance
-ln -s /path/to/0pen.ml ~/bin/
+ln -s $HOME/Downloads/0pen/0pen ~/bin/
+# or
+sudo cp 0pen.ml /usr/local/bin/0pen
 ```
 
 ## FAQ
