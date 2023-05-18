@@ -4,6 +4,8 @@
 - interactively play files with MPlayer, VLC, or any given command (supports [Playtag](https://github.com/nahoj/playtag));
 - output a list of files that can be opened e.g. with `feh` for images or as a standard M3U playlist by any media player.
 
+For a detailed list of available options, see [help.txt](help.txt) or `0pen --help`.
+
 ## Example uses
 
 Shuffle all files under `music/` (excluding dirs and files starting with `+`, `.`, `_`, or `~`) and open them in succession with MPlayer, looping indefinitely (reshuffle between each loop). Only play audio even for video files:
@@ -41,8 +43,6 @@ Shuffle files found under `comedy/`, write a list of the first 100 files, and op
 ```shell
 0pen.ml comedy/ -n 100 >tmp.m3u8 && vlc tmp.m3u8
 ```
-
-For a detailed list of available options, see `0pen --help`.
 
 ## Install
 

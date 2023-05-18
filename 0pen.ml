@@ -961,7 +961,7 @@ module Params = struct
             myspeclist))
 
   let usage_msg =
-    "Usage: 0pen (option|root_path)*\n" ^
+    "Usage: 0pen (option|path)*\n" ^
     "Ex: 0pen -m toto -f toto/africa.ogg"
 
   let parse_command_line () =
