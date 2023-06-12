@@ -61,6 +61,29 @@ module Utils = struct
 
   module Files = struct
 
+    (* 01234[tag1 tag2].ext -> 5 *)
+    let name_main_part_length file_name =
+      let len = String.length file_name in
+      (* Ignore extension *)
+      let len_before_ext = ref (len - 1) in
+      while !len_before_ext >= 0 && file_name.[!len_before_ext] <> '.' do
+        len_before_ext -= 1
+      done;
+      (* If no . or only in first position, there's no extension *)
+      if !len_before_ext < 1 then
+        len_before_ext := len;
+      assert (!len_before_ext >= 0); (* 0 iff. empty string *)
+      (* Ignore tags *)
+      let len_before_tags = ref (!len_before_ext - 1) in
+      while !len_before_tags >= 0 && file_name.[!len_before_tags] <> '[' do
+        len_before_tags -= 1
+      done;
+      (* If no [ or only in first position, there are no tags *)
+      if !len_before_tags < 1 then
+        len_before_tags := !len_before_ext;
+      assert (!len_before_tags >= 0); (* 0 iff. empty string *)
+      !len_before_tags
+
     let path_parts path =
       let rec aux (to_parse : string) (parsed : string list) : string list =
         match Filename.dirname to_parse, Filename.basename to_parse with
@@ -223,7 +246,8 @@ open Utils
 
 module FileTree = struct
 
-  let ignored_first_chars = ref [|'.'; '_'; '~'; '+'|]
+  let default_ignored_first_chars = [|'.'; '_'; '~'; '+'|]
+  let ignored_first_chars = ref default_ignored_first_chars
 
   let set_dont_ignore_plus () =
     ignored_first_chars := [|'.'; '_'; '~'|]
@@ -478,7 +502,10 @@ module FileTree = struct
           if not (IntSet.mem i blackset || IntSet.mem i !seen) then
             (seen := IntSet.add i !seen;
              if Sys.is_directory pf then
-               if ff.[0] = '@' || Strings.is_uppercase ff then
+               if ff.[0] = '@'
+                 || Array.mem ff.[0] default_ignored_first_chars && String.length ff >= 2 && ff.[1] = '@'
+                 || Strings.is_uppercase ff
+               then
                  (* Treat f's chilren as if they were p's children *)
                  Sys.readdir pf |> Array.to_list
                                 |> List.map (fun s -> aux_path depth must mustnot p (Filename.concat f s))
@@ -677,10 +704,10 @@ module Selection = struct
 
   let max_series_length = ref 1
 
-  (** E.g. a1.jgp a2.jpg *)
-  let strings_only_differ_by_one_number s1 s2 =
-    let l1 = String.length s1 in
-    let l2 = String.length s2 in
+  (** E.g. a1.webm a2.jpg *)
+  let filenames_only_differ_by_one_number s1 s2 =
+    let l1 = Files.name_main_part_length s1 in
+    let l2 = Files.name_main_part_length s2 in
     (* Compute common prefix *)
     let prefix_length = ref 0 in
     while !prefix_length < min l1 l2 && s1.[!prefix_length] = s2.[!prefix_length] do
@@ -741,7 +768,7 @@ module Selection = struct
                |> Seq.drop_while (fun f1 -> FileTree.name f1 <> f.name)
                |> Seq.take !max_series_length
                |> Seq.filter_map (function
-                 | File f1 when strings_only_differ_by_one_number f.name f1.name -> Some f1.path
+                 | File f1 when filenames_only_differ_by_one_number f.name f1.name -> Some f1.path
                  | _ -> None
                )
                |> List.of_seq
@@ -990,7 +1017,7 @@ module Play = struct
 
   module Players = struct
 
-    let use_playtag : bool = (Sys.command "which playtag >/dev/null" = 0)
+    let use_playtag : bool = Sys.command "which playtag >/dev/null" = 0
 
     let subs_of_video vid =
       let vid_file_name_dot_noext = Filename.(remove_extension (basename vid)) ^ "." in

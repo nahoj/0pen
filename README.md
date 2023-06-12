@@ -32,7 +32,7 @@ First play `toto/africa.mp3`, then randomly play files from `foo_fighters/` and 
 0pen.ml foo_fighters/ toto/ --pick c/l --first toto/africa.mp3
 ```
 
-Find photos modified (or taken) less than a year ago to open them as a full-screen slideshow. With each directory sorted **a**lphabetically, move by the **g**olden angle 1-1/φ ≈ 0.38 of the length of the list between picking files, which maximizes diversity. Pick series of 3 consecutive photos if possible (Files are considered consecutive if they differ only by a single number. For instance, `IMG_101.jpg` and `IMG_105.jpg` are consecutive but `IMG_106_Cat.jpg` isn't.):
+Find photos modified (or taken) less than a year ago to open them as a full-screen slideshow. With each directory sorted **a**lphabetically, move by the **g**olden angle 1-1/φ ≈ 0.38 of the length of the list between picking files, which maximizes diversity. Pick series of 3 consecutive photos if possible (File names are considered consecutive if they differ only by a single number, extension and name tags excluded. For instance, `IMG_101.webm` and `IMG_105[cats].jpg` are consecutive but `IMG_106_Cat.jpg` isn't.):
 
 ```shell
 find photos/ -mtime -365 | 0pen.ml --pick ag --series 3 | feh -Ff -
