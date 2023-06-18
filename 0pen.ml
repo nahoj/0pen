@@ -190,19 +190,24 @@ module Utils = struct
 
       type key = key_part list
 
+      (* (main part)(tags)?(extension)? *)
+      let filename_regexp = Str.regexp ("^\\(.*\\)" ^ "\\(\\[[^\\[\\]]*\\]\\)?" ^ "\\(\\.[^.]+\\)?$")
+
       let digits_regexp = Str.regexp "[0-9]+"
 
-      let key s : key =
+      let key file_name : key =
         let open Str in
-        s |> Ubase.from_utf8
-          |> full_split digits_regexp
-          |> List.map (function
-            | Delim digits when String.length digits <= 18 -> Int (int_of_string digits)
-            | Delim text
-            | Text text ->
-              assert (text <> "");
-              if Char.code text.[0] < 0x30 then Low text else High text
-          )
+        string_match filename_regexp file_name 0 |> (fun b -> assert b);
+        matched_group 1 file_name
+        |> Ubase.from_utf8
+        |> full_split digits_regexp
+        |> List.map (function
+          | Delim digits when String.length digits <= 18 -> Int (int_of_string digits)
+          | Delim text
+          | Text text ->
+            assert (text <> "");
+            if Char.code text.[0] < 0x30 then Low text else High text
+        )
 
       module UTF8Col = CamomileLibraryDefault.Camomile.UCol.Make(CamomileLibraryDefault.Camomile.UTF8)
 
