@@ -8,7 +8,7 @@ Printexc.record_backtrace true;;
 #load "threads.cma"
 
 #use "topfind";;
-Topfind.load_deeply ["camomile"; "dolog"; "magic-mime"; "ubase"];;
+Topfind.load_deeply ["batteries"; "dolog"; "magic-mime"; "ubase"; "uucp"; "uutf"];;
 
 module Log = Dolog.Log
 open Printf
@@ -36,53 +36,7 @@ module Utils = struct
     exit 1
 
 
-  module Arrays = struct
-
-    (* Apply f to all elements of a, in place *)
-    let apply f a =
-      for i = 0 to Array.length a - 1 do
-        a.(i) <- f a.(i)
-      done
-
-    let shuffle a =
-      let swap i j =
-        let t = a.(i) in
-        a.(i) <- a.(j);
-        a.(j) <- t
-      in
-      let len = Array.length a in
-      for i = 0 to len - 2 do
-        let j = i + Random.int (len - i) in
-        swap i j
-      done
-
-  end
-
-
   module Files = struct
-
-    (* 01234[tag1 tag2].ext -> 5 *)
-    let name_main_part_length file_name =
-      let len = String.length file_name in
-      (* Ignore extension *)
-      let len_before_ext = ref (len - 1) in
-      while !len_before_ext >= 0 && file_name.[!len_before_ext] <> '.' do
-        len_before_ext -= 1
-      done;
-      (* If no . or only in first position, there's no extension *)
-      if !len_before_ext < 1 then
-        len_before_ext := len;
-      assert (!len_before_ext >= 0); (* 0 iff. empty string *)
-      (* Ignore tags *)
-      let len_before_tags = ref (!len_before_ext - 1) in
-      while !len_before_tags >= 0 && file_name.[!len_before_tags] <> '[' do
-        len_before_tags -= 1
-      done;
-      (* If no [ or only in first position, there are no tags *)
-      if !len_before_tags < 1 then
-        len_before_tags := !len_before_ext;
-      assert (!len_before_tags >= 0); (* 0 iff. empty string *)
-      !len_before_tags
 
     let path_parts path =
       let rec aux (to_parse : string) (parsed : string list) : string list =
@@ -107,7 +61,7 @@ module Utils = struct
       let rec aux p =
         if Sys.is_directory p then
           (let files = Sys.readdir p in
-           Arrays.apply (fun f -> Filename.concat p f) files;
+           BatArray.modify (fun f -> Filename.concat p f) files;
            Array.iter aux files)
         else
           res := IntSet.add (ino p) !res
@@ -137,13 +91,8 @@ module Utils = struct
       let res = List.hd !lr in
       lr := List.tl !lr;
       res
-  
-    let shuffle l =
-      let a = Array.of_list l in
-      Arrays.shuffle a;
-      Array.to_list a
 
-  end
+    end
 
 
   module Seqs = struct
@@ -168,78 +117,130 @@ module Utils = struct
 
   module Strings = struct
 
-    let char_is_digit c =
-      let code = Char.code c in
-      code >= 0x30 && code < 0x3A
+    (* Compare 2 UTF8 strings, assuming they are symbolically equal iff. their encodings are equal *)
+    let utf8_compare s1 s2 =
+      let rec loop d1 d2 =
+        match Uutf.decode d1, Uutf.decode d2 with
+        | `End, `End -> 0
+        | `End, _ -> -1
+        | _, `End -> 1
+        | whatever1, whatever2 ->
+          let c = compare whatever1 whatever2 in
+          if c <> 0 then
+            c
+          else
+            loop d1 d2
+      in
+      loop (Uutf.decoder ~encoding:`UTF_8 (`String s1)) (Uutf.decoder ~encoding:`UTF_8 (`String s2))
 
+    (* Return true iff. `s` does not contain any lowercase character *)
     let is_uppercase s =
-      (* this is great *)
-      let s_ubase = Ubase.from_utf8 s in
-      let open CamomileLibraryDefault.Camomile in
-      let open UReStr in
-      let open UReStr.Make(UTF8) in
-      (* Is there at least a letter *)
-      search_forward (compile (regexp "[A-Z]")) s_ubase 0 != None
-      (* Is there no lowercase letter *)
-      && search_forward (compile (regexp "[a-z]")) s_ubase 0 = None
-
+      let rec loop d =
+        match Uutf.decode d with
+        | `Uchar u when Uucp.Case.is_lower u -> false
+        | `Uchar _ | `Malformed _ -> loop d
+        | `End -> true
+        | `Await -> assert false
+      in
+      loop (Uutf.decoder ~encoding:`UTF_8 (`String s))
 
     module FileManagerSort = struct
 
       type key_part = Low of string | Int of int | High of string
 
-      type key = key_part list
+      type key = key_part array
 
-      (* (main part)(tags)?(extension)? *)
-      let filename_regexp = Str.regexp ("^\\(.*\\)" ^ "\\(\\[[^\\[\\]]*\\]\\)?" ^ "\\(\\.[^.]+\\)?$")
+      let key_part_is_int = function
+      | Int _ -> true
+      | _ -> false
+
+      let key_part_to_string = function
+      | Low s | High s -> s
+      | Int n -> string_of_int n
+
+      let filename_maybe_tag_group_regexp = Str.regexp ("^\\([^[]*\\)" ^ "\\([[][^]]*[]]\\)?" ^ "\\(.*\\)$")
+      let remove_tag_group file_name =
+        Str.string_match filename_maybe_tag_group_regexp file_name 0 |> (fun b -> assert b);
+        Str.matched_group 1 file_name ^ Str.matched_group 3 file_name
 
       let digits_regexp = Str.regexp "[0-9]+"
 
       let key file_name : key =
         let open Str in
-        string_match filename_regexp file_name 0 |> (fun b -> assert b);
-        matched_group 1 file_name
+        file_name
+        |> remove_tag_group
+        |> Filename.remove_extension
         |> Ubase.from_utf8
+        |> String.lowercase_ascii
         |> full_split digits_regexp
-        |> List.map (function
+        |> List.to_seq
+        |> Seq.map (function
           | Delim digits when String.length digits <= 18 -> Int (int_of_string digits)
           | Delim text
           | Text text ->
             assert (text <> "");
             if Char.code text.[0] < 0x30 then Low text else High text
-        )
-
-      module UTF8Col = CamomileLibraryDefault.Camomile.UCol.Make(CamomileLibraryDefault.Camomile.UTF8)
+          )
+        |> Array.of_seq
 
       let compare_parts p1 p2 =
         match p1, p2 with
-        | High t1, High t2 -> UTF8Col.compare t1 t2
+        | High t1, High t2 -> utf8_compare t1 t2
         | High _, _ -> 1
         | _, High _ -> -1
-        | Low t1, Low t2 -> UTF8Col.compare t1 t2
+        | Low t1, Low t2 -> utf8_compare t1 t2
         | Low _, _ -> -1
         | _, Low _ -> 1
-        | Int n1, Int n2 -> Stdlib.compare n1 n2
+        | Int n1, Int n2 -> compare n1 n2
 
-      let rec compare_keys k1 k2 =
-        match k1, k2 with
-        | [], [] -> 0
-        | [], _ -> -1
-        | _, [] -> 1
-        | part1 :: rest1, part2 :: rest2 ->
-          let c = compare_parts part1 part2 in
-          if c <> 0 then c else compare_keys rest1 rest2
+      let compare_keys k1 k2 =
+        BatArray.compare compare_parts k1 k2
 
       let compare_with_keys s1 key1 s2 key2 =
         let key_result = compare_keys key1 key2 in
         if key_result <> 0 then
           key_result
         else
-          Stdlib.compare s1 s2
+          utf8_compare s1 s2
 
       let compare s1 s2 =
         compare_with_keys s1 (key s1) s2 (key s2)
 
+      let number_separator_regexp = Str.regexp "^\\([ex]\\|[^a-z]+\\)" (* For lowercase strings *)
+
+      (** Test whether 2 keys only differ by one number or one sequence of numbers *)
+      let keys_are_in_sequence k1 k2 =
+        if Array.length k1 <> Array.length k2 then
+          false
+        else
+          let i = ref 0 and j = ref (Array.length k1) in
+          (* Common prefix *)
+          while !i < !j && k1.(!i) = k2.(!i) do
+            i += 1
+          done;
+          (* Common suffix *)
+          while !j > !i && k1.(!j - 1) = k2.(!j - 1) do
+            j -= 1
+          done;
+          if !i = !j then
+            (* k1 = k2 *)
+            true
+          (* Differing parts must begin and end with numbers (note: !j - 1 may = !i) *)
+          else if not (Array.for_all key_part_is_int [|k1.(!i); k2.(!i); k1.(!j - 1); k2.(!j - 1)|]) then
+            false
+          else begin
+            while
+              !i < !j &&
+                match k1.(!i), k2.(!i) with
+                | Int _, Int _ -> true
+                | part1, part2 ->
+                  let s1 = key_part_to_string part1 and s2 = key_part_to_string part2 in
+                  s1 = s2 && Str.string_match number_separator_regexp s1 0
+            do
+              i += 1
+            done;
+            !i = !j
+          end
     end
   end
 end
@@ -259,6 +260,14 @@ module FileTree = struct
 
   let file_is_ignored name =
     Array.mem name.[0] !ignored_first_chars && not (Array.mem name [|"."; ".."|])
+
+  let dir_flattening_characters = [|':'; '='|]
+
+  let dir_should_be_flattened name =
+    Array.mem name.[0] dir_flattening_characters
+    || (Array.mem name.[0] default_ignored_first_chars
+        && String.length name >= 2 && Array.mem name.[1] dir_flattening_characters)
+    || Strings.is_uppercase name
 
   module T = struct
     type tree =
@@ -343,7 +352,7 @@ module FileTree = struct
   let rec shuffle = function
     | File _ as f -> f
     | Dir d ->
-      let children = Lists.shuffle (List.map (fun (t, w) -> shuffle t, w) d.children) in
+      let children = BatList.shuffle (List.map (fun (t, w) -> shuffle t, w) d.children) in
       Dir { d with children }
     | Void -> Void
 
@@ -398,7 +407,7 @@ module FileTree = struct
         | name::_ when file_is_ignored name -> file_map
         | [file_name] -> StringMap.add file_name (MFile { path }) file_map
         | dir_name::rest ->
-          (* FIXME @ and UPPERCASE dirs *)
+          (* FIXME flatten dirs that should be *)
           let contents0 =
             match StringMap.find_opt dir_name file_map with
             | None -> StringMap.empty
@@ -507,10 +516,7 @@ module FileTree = struct
           if not (IntSet.mem i blackset || IntSet.mem i !seen) then
             (seen := IntSet.add i !seen;
              if Sys.is_directory pf then
-               if ff.[0] = '@'
-                 || Array.mem ff.[0] default_ignored_first_chars && String.length ff >= 2 && ff.[1] = '@'
-                 || Strings.is_uppercase ff
-               then
+               if dir_should_be_flattened ff then
                  (* Treat f's chilren as if they were p's children *)
                  Sys.readdir pf |> Array.to_list
                                 |> List.map (fun s -> aux_path depth must mustnot p (Filename.concat f s))
@@ -699,7 +705,7 @@ module Selection = struct
   let build_shuffle_seq filetree : string Seq.t =
     let files = FileTree.to_array filetree in
     let next_seq () =
-      Arrays.shuffle files;
+      BatArray.shuffle files;
       Array.to_seq files
     in
     Seq.concat (Seq.forever next_seq)
@@ -708,28 +714,6 @@ module Selection = struct
   (* === Picking === *)
 
   let max_series_length = ref 1
-
-  (** E.g. a1.webm a2.jpg *)
-  let filenames_only_differ_by_one_number s1 s2 =
-    let l1 = Files.name_main_part_length s1 in
-    let l2 = Files.name_main_part_length s2 in
-    (* Compute common prefix *)
-    let prefix_length = ref 0 in
-    while !prefix_length < min l1 l2 && s1.[!prefix_length] = s2.[!prefix_length] do
-      prefix_length += 1
-    done;
-    (* Return true if strings are equal, or *)
-    !prefix_length = min l1 l2 || (
-      (* Compute common suffix *)
-      let max_suffix_length = min l1 l2 - !prefix_length in
-      let suffix_length = ref 0 in
-      while !suffix_length < max_suffix_length && s1.[l1 - 1 - !suffix_length] = s2.[l2 - 1 - !suffix_length] do
-        suffix_length += 1
-      done;
-      let s1_sub = String.sub s1 !prefix_length (l1 - !prefix_length - !suffix_length) in
-      let s2_sub = String.sub s2 !prefix_length (l2 - !prefix_length - !suffix_length) in
-      String.for_all Strings.char_is_digit s1_sub && String.for_all Strings.char_is_digit s2_sub
-    )
 
   (** Pick file at abscissa x0 in t *)
   (* Superseded by pick_series below but kept for future reference because simpler to understand *)
@@ -765,7 +749,7 @@ module Selection = struct
         done;
         (match List.hd !c with
          | Dir _ as subtree, subtree_weight -> aux (Floats.deintify !x /. subtree_weight) subtree
-         | File f, _ ->
+         | File f as tf, _ ->
            (* Return f and the following files that differ only by a number *)
            if !max_series_length > 1 then begin
              let series =
@@ -773,7 +757,9 @@ module Selection = struct
                |> Seq.drop_while (fun f1 -> FileTree.name f1 <> f.name)
                |> Seq.take !max_series_length
                |> Seq.filter_map (function
-                 | File f1 when filenames_only_differ_by_one_number f.name f1.name -> Some f1.path
+                 | File f1 as tf1 when
+                     Strings.FileManagerSort.keys_are_in_sequence (FileTree.name_key tf) (FileTree.name_key tf1)
+                   -> Some f1.path
                  | _ -> None
                )
                |> List.of_seq

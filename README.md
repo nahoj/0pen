@@ -20,7 +20,7 @@ Play all files under `foo_fighters/` once, in alphabetical / "file-manager" orde
 0pen.ml foo_fighters/ --alpha
 ```
 
-Play all files under `comedy/`, including dirs and files starting with `+`, picking them indefinitely at random. Each subdirectory's probability of being picked is proportional to the s**q**uare root of the total number of (leaf) files it contains. As an exception, directories named in `ALL_CAPS` or starting with `@` have their children treated as if they were direct children of the parent directory.
+Play all files under `comedy/`, including dirs and files starting with `+`, picking them indefinitely at random. Each subdirectory's probability of being picked is proportional to the s**q**uare root of the total number of (leaf) files it contains. As an exception, directories named in `ALL_CAPS` or starting with `=` or `:` have their children treated as if they were direct children of the parent directory.
 
 ```shell
 0pen.ml comedy/ -+ --pick q
@@ -32,7 +32,7 @@ First play `toto/africa.mp3`, then randomly play files from `foo_fighters/` and 
 0pen.ml foo_fighters/ toto/ --pick c/l --first toto/africa.mp3
 ```
 
-Find photos modified (or taken) less than a year ago to open them as a full-screen slideshow. With each directory sorted **a**lphabetically, move by the **g**olden angle 1-1/φ ≈ 0.38 of the length of the list between picking files, which maximizes diversity. Pick series of 3 consecutive photos if possible (File names are considered consecutive if they differ only by a single number, extension and name tags excluded. For instance, `IMG_101.webm` and `IMG_105[cats].jpg` are consecutive but `IMG_106_Cat.jpg` isn't.):
+Find photos modified (or taken) less than a year ago to open them as a full-screen slideshow. With each directory sorted **a**lphabetically, move by the **g**olden angle 1-1/φ ≈ 0.38 of the length of the list between picking files, which maximizes diversity. Pick series of 3 consecutive photos if possible (File names are considered consecutive if they differ only by one number or sequence of numbers, extension and [name tags](https://github.com/nahoj/tss) excluded. For instance, `IMG_101_1.webp` and `IMG_105_2[cats].jpg` are consecutive but `IMG_106_2_Cat.jpg` isn't.):
 
 ```shell
 find photos/ -mtime -365 | 0pen.ml --pick ag --series 3 | feh -Ff -
@@ -46,7 +46,7 @@ Shuffle files found under `comedy/`, write a list of the first 100 files, and op
 
 ## Install
 
-0pen requires OCaml 4.14 with Camomile 1.x, Ocamlfind, dolog, magic-mime, and ubase.
+0pen requires OCaml 4.14 with ocamlfind, batteries, dolog, magic-mime, ubase, uucp, and uutf.
 
 Using `opam` on Ubuntu, installing from the ground up could look something like:
 
@@ -54,7 +54,7 @@ Using `opam` on Ubuntu, installing from the ground up could look something like:
 sudo apt install opam
 opam init
 opam switch create 4.14.1
-opam install 'camomile<2' ocamlfind dolog magic-mime ubase
+opam install ocamlfind batteries dolog magic-mime ubase uucp uutf
 
 # and then, for instance
 ln -s $HOME/Downloads/0pen/0pen ~/bin/
