@@ -405,14 +405,18 @@ module FileTree = struct
         | [] -> failwith "Invalid argument (parts=[])"
         | name::_ when file_is_ignored name -> file_map
         | [file_name] -> StringMap.add file_name (MFile { path }) file_map
+        | dir_name::rest when dir_should_be_flattened dir_name ->
+          (* Directly add path to ancestor map *)
+          aux path rest file_map
         | dir_name::rest ->
-          (* FIXME flatten dirs that should be *)
+          (* Get or create dir contents map *)
           let contents0 =
             match StringMap.find_opt dir_name file_map with
             | None -> StringMap.empty
             | Some (MDir { contents }) -> contents
             | Some (MFile _) -> failwith (dir_name ^ " can't be both a file and a dir")
           in
+          (* Add path to it *)
           let contents = aux path rest contents0 in
           StringMap.add dir_name (MDir { contents }) file_map
       in
