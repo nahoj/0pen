@@ -5,7 +5,7 @@ all:
 
 install-deps:
 	opam update
-	opam install 'camomile<2' dolog magic-mime ocamlfind ubase
+	opam install ocamlfind batteries dolog magic-mime ubase uucp uutf
 .PHONY: install-deps
 
 

@@ -46,14 +46,14 @@ Shuffle files found under `comedy/`, write a list of the first 100 files, and op
 
 ## Install
 
-0pen requires OCaml 4.14 with ocamlfind, batteries, dolog, magic-mime, ubase, uucp, and uutf.
+0pen requires OCaml `>= 4.14` with ocamlfind, batteries, dolog, magic-mime, ubase, uucp, and uutf.
 
 Using `opam` on Ubuntu, installing from the ground up could look something like:
 
 ```shell
 sudo apt install opam
 opam init
-opam switch create 4.14.1
+opam switch create 5.0
 opam install ocamlfind batteries dolog magic-mime ubase uucp uutf
 
 # and then, for instance

@@ -2,6 +2,7 @@
 
 Printexc.record_backtrace true;;
 
+[@@@alert "-ocaml_deprecated_auto_include"]
 #load "unix.cma"
 #load "str.cma"
 #directory "+threads"
@@ -1192,9 +1193,12 @@ module Play = struct
         | _ -> ()
 
     let rec interact () =
-      if !on_pause || Thread.wait_timed_read Unix.stdin !Params.break_delay then
-        (handle_input_char (input_char Stdlib.stdin);
-         interact ())
+      (* If we're on pause or if the user gives input before break_delay *)
+      if !on_pause || Unix.select [Unix.stdin] [] [] !Params.break_delay <> ([], [], []) then begin
+        (* wait for and react to input *)
+        handle_input_char (input_char Stdlib.stdin);
+        interact ()
+      end
 
   end
 
@@ -1298,4 +1302,3 @@ end
 
 let _ =
   Unix.handle_unix_error Main.main ()
-
