@@ -5,8 +5,6 @@ Printexc.record_backtrace true;;
 [@@@alert "-ocaml_deprecated_auto_include"]
 #load "unix.cma"
 #load "str.cma"
-#directory "+threads"
-#load "threads.cma"
 
 #use "topfind";;
 Topfind.load_deeply ["batteries"; "dolog"; "magic-mime"; "ubase"; "uucp"; "uutf"];;
