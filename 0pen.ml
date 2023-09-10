@@ -37,16 +37,12 @@ module Utils = struct
 
   module Files = struct
 
-    let path_parts path =
-      let rec aux (to_parse : string) (parsed : string list) : string list =
-        match Filename.dirname to_parse, Filename.basename to_parse with
-        | "/", "/" -> "/" :: parsed
-        | "/", b -> "/" :: b :: parsed (* optim *)
-        | ".", "." -> parsed
-        | ".", b -> b :: parsed (* optim *)
-        | d, b -> aux d (b :: parsed)
-      in
-      aux path []
+    let path_parts_no_dot path =
+      let parts = String.split_on_char '/' path |> List.filter (fun s -> s <> "" && s <> ".") in
+      if path.[0] = '/' then
+        "/" :: parts
+      else
+        parts
 
     (* Get inode number of file `f`. Dereferences symlinks. *)
     let ino f : int =
@@ -91,7 +87,7 @@ module Utils = struct
       lr := List.tl !lr;
       res
 
-    end
+  end
 
 
   module Seqs = struct
@@ -116,7 +112,7 @@ module Utils = struct
 
   module Strings = struct
 
-    (* Compare 2 UTF8 strings, assuming they are symbolically equal iff. their encodings are equal *)
+    (* Compare 2 UTF8 strings, assuming they are symbolically equal iff. their characters are equal *)
     let utf8_compare s1 s2 =
       let rec loop d1 d2 =
         match Uutf.decode d1, Uutf.decode d2 with
@@ -132,13 +128,12 @@ module Utils = struct
       in
       loop (Uutf.decoder ~encoding:`UTF_8 (`String s1)) (Uutf.decoder ~encoding:`UTF_8 (`String s2))
 
-    (* Return true iff. `s` does not contain any lowercase character *)
-    let is_uppercase s =
+    let exists test s =
       let rec loop d =
         match Uutf.decode d with
-        | `Uchar u when Uucp.Case.is_lower u -> false
+        | `Uchar u when test u -> true
         | `Uchar _ | `Malformed _ -> loop d
-        | `End -> true
+        | `End -> false
         | `Await -> assert false
       in
       loop (Uutf.decoder ~encoding:`UTF_8 (`String s))
@@ -260,13 +255,22 @@ module FileTree = struct
   let file_is_ignored name =
     Array.mem name.[0] !ignored_first_chars && not (Array.mem name [|"."; ".."|])
 
+  let path_is_ignored path =
+    List.exists file_is_ignored (Files.path_parts_no_dot path)
+
   let dir_flattening_characters = [|':'; '='|]
 
   let dir_should_be_flattened name =
+    (* =foo *)
     Array.mem name.[0] dir_flattening_characters
+    (* +=foo *)
     || (Array.mem name.[0] default_ignored_first_chars
         && String.length name >= 2 && Array.mem name.[1] dir_flattening_characters)
-    || Strings.is_uppercase name
+    (* FOO *)
+    || (Strings.exists Uucp.Case.is_cased name && not (Strings.exists Uucp.Case.is_lower name))
+
+  let path_should_be_flattened path =
+    List.for_all dir_should_be_flattened (Files.path_parts_no_dot path)
 
   module T = struct
     type tree =
@@ -348,6 +352,9 @@ module FileTree = struct
     else
       Void
 
+  let of_tree_seq name trees =
+    of_tree_list name (List.of_seq trees)
+
   let rec shuffle = function
     | File _ as f -> f
     | Dir d ->
@@ -420,7 +427,7 @@ module FileTree = struct
           let contents = aux path rest contents0 in
           StringMap.add dir_name (MDir { contents }) file_map
       in
-      aux path (Files.path_parts path) file_map
+      aux path (Files.path_parts_no_dot path) file_map
 
     let file_map_of_file_path_list (l : string list) =
       List.fold_left add_path_to_file_map (StringMap.empty) l
@@ -444,111 +451,31 @@ module FileTree = struct
 
   module OfFileSystem = struct
 
-    type tag_expr =
-      | TPath of string
-      | TOr of tag_expr list
-      | TAnd of tag_expr * tag_expr
-      | TDiff of tag_expr * tag_expr
-
-    let parse_tag_expr input0 =
-      let input = ref input0 in
-      let res = ref [] in
-      while !input != [] do
-        match Lists.pop input with
-          | "and" ->
-              assert (!res != []);
-              Lists.push res (TAnd (Lists.pop res, TPath (Lists.pop input)))
-          | "!" ->
-              Lists.push res (TDiff (Lists.pop res, TPath (Lists.pop input)))
-          | path ->
-              Lists.push res (TPath path)
-      done;
-      TOr (List.rev !res)
-
-    let rec inode_set_of_tag_expr = function
-      | TPath p -> Files.inode_set_of_path p
-      | TOr l ->
-          List.fold_left IntSet.union IntSet.empty
-            (List.map inode_set_of_tag_expr l)
-      | TAnd (te1, te2) ->
-          let res =
-            IntSet.inter (inode_set_of_tag_expr te1) (inode_set_of_tag_expr te2)
-          in
-          if res = IntSet.empty then
-            Log.warn "Empty set intersection";
-          res
-      | TDiff (te1, te2) ->
-          let res =
-          IntSet.diff (inode_set_of_tag_expr te1) (inode_set_of_tag_expr te2)
-          in
-          if res = IntSet.empty then
-            Log.warn "Empty set difference";
-          res
-
-    let build min_depth max_depth roots blacklist =
-      let blackset = Files.inode_set_of_file_list blacklist in
-      let seen = ref IntSet.empty in
-
-      let rec aux_expr depth must mustnot = function
-        | TPath p ->
-            begin match aux_path depth must mustnot "" p with
-              | [tree] -> tree
-              | trees -> of_tree_list "" trees
-            end
-        | TOr exprs ->
-            let trees = List.map (aux_expr (depth+1) must mustnot) exprs in
-            of_tree_list "" trees
-        | TAnd (e1, e2) ->
-            let s2 = inode_set_of_tag_expr e2 in
-            let new_must =
-              match must with
-                | None -> Some s2
-                | Some s -> Some (IntSet.union s s2)
-            in
-            aux_expr depth new_must mustnot e1
-        | TDiff (e1, e2) ->
-            aux_expr depth must (IntSet.union mustnot (inode_set_of_tag_expr e2)) e1
-
-      and aux_path depth must mustnot p f =
-        assert (max_depth < 0 || depth <= max_depth);
-        (* assert (String.length (Filename.basename f) > 0) *)
-        let ff = Filename.basename f in
-        if not (file_is_ignored ff) || (depth = 0 && (f = "." || f = "..")) then
-          let pf = Filename.concat p f in
-          let i = Files.ino pf in
-          if not (IntSet.mem i blackset || IntSet.mem i !seen) then
-            (seen := IntSet.add i !seen;
-             if Sys.is_directory pf then
-               if dir_should_be_flattened ff then
-                 (* Treat f's chilren as if they were p's children *)
-                 Sys.readdir pf |> Array.to_list
-                                |> List.map (fun s -> aux_path depth must mustnot p (Filename.concat f s))
-                                |> List.concat
-               else if max_depth < 0 || depth < max_depth then
-                 [aux_dir depth must mustnot pf f (Array.to_list (Sys.readdir pf))]
-               else
-                 [Void]
-             else
-               if (min_depth < 0 || depth >= min_depth)
-                 && (match must with None -> true | Some s -> IntSet.mem i s)
-                 && not (IntSet.mem i mustnot)
-               then
-                 [File { name = f; name_key = lazy (Strings.FileManagerSort.key f); path = pf; weight = 1. }]
-               else
-                 [Void])
-          else
-            [Void]
-        else
-          [Void]
-
-      and aux_dir depth must mustnot pf f children0 =
-        let children1 =
-          List.concat @@ List.map (aux_path (depth+1) must mustnot pf) children0
+    let rec tree_seq_of_path full_path name_only =
+      if Sys.is_directory full_path then
+        let trees =
+          Sys.readdir full_path
+            |> Array.to_seq
+            |> Seq.filter (fun child_name -> not (file_is_ignored child_name))
+            |> Seq.map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
+            |> Seq.concat
         in
-        of_tree_list f children1
+        if path_should_be_flattened full_path then
+          trees
+        else
+          Seq.return (of_tree_seq name_only trees)
 
-      in
-      aux_expr ~-1 None IntSet.empty (parse_tag_expr roots)
+      else
+        Seq.return
+          (File { name = name_only; name_key = lazy (Strings.FileManagerSort.key name_only); path = full_path;
+            weight = 1. })
+
+    let build roots =
+      roots
+        |> List.to_seq
+        |> Seq.filter (fun root -> not (path_is_ignored root))
+        |> Seq.map (fun root -> tree_seq_of_path root (Filename.basename root) |> of_tree_seq root)
+        |> of_tree_seq "[root]"
 
   end
 
@@ -619,7 +546,7 @@ module FileTypes = struct
   type file_type = Audio | Image | Subtitles | Video | Other
 
   let subtitles_extensions =
-    [ "ass"; "smi"; "srt"; "ssa"; "sub"; "vtt" ]
+    [ "ass"; "smi"; "srt"; "ssa"; "sub"; "sup"; "vtt" ]
   let otheravnoise_extensions =
     [ "exe"; "idx" ]
 
@@ -916,9 +843,6 @@ module Params = struct
 
   (* === Main === *)
 
-  let blacklist = ref []
-  let min_depth = ref ~-1
-  let max_depth = ref ~-1
   let first_file = ref ""
   let input_list = ref ""
   let roots = ref []
@@ -940,11 +864,8 @@ module Params = struct
     let open Arg in
   [
     ["--input-list"; "-i"], Set_string input_list, "FILE Use the given file list instead of browsing the filesystem";
-    ["--min-depth"; "-d"], Set_int min_depth, " ";
-    ["--max-depth"; "-D"], Set_int max_depth, " ";
     ["--first"; "-f"], Set_string first_file, "FILE First file to open";
     ["--more"; "-+"], Unit FileTree.set_dont_ignore_plus, " Don't exclude files starting with +, only ._~";
-    ["--not"; "-!"], String (fun s -> blacklist := s :: !blacklist), "PATH Don't open files in the given path\n";
 
     ["-n"], Int (fun n -> max_files_to_open := Some n), "N Open/output at most N files";
     ["--alpha"; "-a"], Unit (fun () -> order := Alpha),
@@ -991,9 +912,6 @@ module Params = struct
     (match !input_list, !roots with
      | "", [] -> input_list := "-"
      | "", _ -> roots := List.rev !roots
-     | _, [] when !blacklist <> [] -> crash "--not/-! not supported when using an input file list (including stdin)"
-     | _, [] when !min_depth <> ~-1 || !max_depth <> ~-1 ->
-       crash "--mindepth/--maxdepth not supported when using an input file list (including stdin)"
      | _, [] -> ()
      | _, _ -> crash "Can't provide both an input list file and roots as command-line arguments");
 
@@ -1243,23 +1161,27 @@ module Main = struct
       if !Params.input_list <> "" then
         let ic = if !Params.input_list = "-" then In_channel.stdin else In_channel.open_text !Params.input_list in
         let lines = ref [] in
-        (try
-           while true do
-             lines := input_line ic :: !lines;
-           done
-         with
-           End_of_file ->
-             close_in ic;
-             lines := List.rev !lines);
+        begin try
+          while true do
+            lines := input_line ic :: !lines;
+          done
+        with End_of_file ->
+          close_in ic;
+          lines := List.rev !lines
+        end;
         ref (FileTree.OfPathList.build !lines)
-      else
-        ((match !Params.roots with
-            | [s] when not (Sys.is_directory s) && !Params.first_file = "" && Selection.order_is_random !Params.order ->
-                Params.first_file := s;
-                Params.roots := [Filename.dirname s]
-            | _ -> ());
-         ref (FileTree.OfFileSystem.build !Params.min_depth !Params.max_depth !Params.roots !Params.blacklist))
+
+      else begin
+        begin match !Params.roots with
+        | [s] when not (Sys.is_directory s) && !Params.first_file = "" && Selection.order_is_random !Params.order ->
+            Params.first_file := s;
+            Params.roots := [Filename.dirname s]
+        | _ -> ()
+        end;
+        ref (FileTree.OfFileSystem.build !Params.roots)
+      end
     in
+
     if FileTree.num_files !file_tree = 0 then
       crash "No files to open.";
 

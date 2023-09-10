@@ -2,17 +2,10 @@ Usage: 0pen (option|path)*
 Ex: 0pen -m toto -f toto/africa.ogg
   --input-list FILE Use the given file list instead of browsing the filesystem
   -i                
-  --min-depth       
-  -d                
-  --max-depth       
-  -D                
   --first FILE      First file to open
   -f                
   --more            Don't exclude files starting with +, only ._~
   -+                
-  --not PATH        Don't open files in the given path
-
-  -!                
   -n N              Open/output at most N files
   --alpha           Read all files once in file-manager order, i.e., in lexical order except '9' < '10'
   -a                
