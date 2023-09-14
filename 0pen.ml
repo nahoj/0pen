@@ -267,7 +267,7 @@ module FileTree = struct
     || (Array.mem name.[0] default_ignored_first_chars
         && String.length name >= 2 && Array.mem name.[1] dir_flattening_characters)
     (* FOO *)
-    || (Strings.exists Uucp.Case.is_cased name && not (Strings.exists Uucp.Case.is_lower name))
+    || (Strings.exists Uucp.Case.is_cased name && not @@ Strings.exists Uucp.Case.is_lower name)
 
   let path_should_be_flattened path =
     List.for_all dir_should_be_flattened (Files.path_parts_no_dot path)
@@ -546,9 +546,9 @@ module FileTypes = struct
   type file_type = Audio | Image | Subtitles | Video | Other
 
   let subtitles_extensions =
-    [ "ass"; "smi"; "srt"; "ssa"; "sub"; "sup"; "vtt" ]
-  let otheravnoise_extensions =
-    [ "exe"; "idx" ]
+    [| "ass"; "smi"; "srt"; "ssa"; "sub"; "sup"; "vtt" |]
+  let noise_extensions =
+    Array.append subtitles_extensions [| "exe"; "idx" |]
 
   let file_extension f =
     let dot_ext = Filename.extension f in
@@ -559,7 +559,7 @@ module FileTypes = struct
 
   let is_avnoise file_name =
     let ext = file_extension file_name in
-    if List.mem ext subtitles_extensions || List.mem ext otheravnoise_extensions then
+    if Array.mem ext noise_extensions then
       true
     else if ext = "gif" then
       false
@@ -569,6 +569,11 @@ module FileTypes = struct
       | t when String.starts_with ~prefix:"text/" t -> true
       | _ -> false
     end
+
+  let is_image_noise file_name =
+    let ext = file_extension file_name in
+    Array.mem ext noise_extensions
+    || String.starts_with ~prefix:"text/" @@ Mime_types.map_extension ext
 
   let main_type = ref None
   let mode_music = ref None (* None = default = auto *)
@@ -939,7 +944,7 @@ module Play = struct
       |> Seq.filter_map (fun file_name ->
           if
             String.starts_with ~prefix:vid_file_name_dot_noext file_name
-            && List.mem (FileTypes.file_extension file_name) FileTypes.subtitles_extensions
+            && Array.mem (FileTypes.file_extension file_name) FileTypes.subtitles_extensions
           then
             Some (Filename.concat dir_name file_name)
           else
@@ -1157,6 +1162,7 @@ module Main = struct
     Params.parse_command_line ();
 
     (* Build file seq *)
+    Log.debug "Building file tree";
     let file_tree =
       if !Params.input_list <> "" then
         let ic = if !Params.input_list = "-" then In_channel.stdin else In_channel.open_text !Params.input_list in
@@ -1187,8 +1193,11 @@ module Main = struct
 
     (* Determine main file type to set music mode and remove irrelevant files from the tree *)
     FileTypes.count_files_by_type !file_tree;
-    if !FileTypes.main_type = Some Audio || !FileTypes.main_type = Some Video then
-      file_tree := FileTree.remove FileTypes.is_avnoise !file_tree;
+    begin match !FileTypes.main_type with
+    | Some (Audio | Video) -> file_tree := FileTree.remove FileTypes.is_avnoise !file_tree
+    | Some Image -> file_tree := FileTree.remove FileTypes.is_image_noise !file_tree
+    | _ -> ()
+    end;
 
     (* Log example weighing when using more than one weight *)
     begin match !Params.order with
@@ -1207,6 +1216,7 @@ module Main = struct
     | _ -> ()
     end;
 
+    Log.debug "Initializing play sequence";
     let seq =
       let seq0 = Selection.build_seq !Params.order !file_tree in
       if !Params.first_file <> "" then
