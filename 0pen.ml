@@ -453,8 +453,15 @@ module FileTree = struct
 
     let rec tree_seq_of_path full_path name_only =
       if Sys.is_directory full_path then
+        let child_names =
+          try
+          	Sys.readdir full_path
+          with Sys_error msg ->
+            Log.warn "Sys_error: %s" msg;
+            [||]
+        in
         let trees =
-          Sys.readdir full_path
+          child_names
             |> Array.to_seq
             |> Seq.filter (fun child_name -> not (file_is_ignored child_name))
             |> Seq.map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
