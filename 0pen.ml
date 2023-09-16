@@ -393,7 +393,7 @@ module FileTree = struct
     a
 
   let rec to_seq = function
-    | Dir d -> d.children |> List.to_seq |> Seq.map (fun (t, _) -> to_seq t) |> Seq.concat
+    | Dir d -> d.children |> List.to_seq |> Seq.flat_map (fun (t, _) -> to_seq t)
     | File file -> Seq.return file.path
     | Void -> Seq.empty
 
@@ -451,7 +451,7 @@ module FileTree = struct
 
   module OfFileSystem = struct
 
-    let rec tree_seq_of_path full_path name_only =
+    let rec tree_seq_of_path full_path tree_name =
       if Sys.is_directory full_path then
         let child_names =
           try
@@ -464,24 +464,23 @@ module FileTree = struct
           child_names
             |> Array.to_seq
             |> Seq.filter (fun child_name -> not (file_is_ignored child_name))
-            |> Seq.map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
-            |> Seq.concat
+            |> Seq.flat_map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
         in
         if path_should_be_flattened full_path then
           trees
         else
-          Seq.return (of_tree_seq name_only trees)
+          Seq.return (of_tree_seq tree_name trees)
 
       else
         Seq.return
-          (File { name = name_only; name_key = lazy (Strings.FileManagerSort.key name_only); path = full_path;
+          (File { name = tree_name; name_key = lazy (Strings.FileManagerSort.key tree_name); path = full_path;
             weight = 1. })
 
     let build roots =
       roots
         |> List.to_seq
         |> Seq.filter (fun root -> not (path_is_ignored root))
-        |> Seq.map (fun root -> tree_seq_of_path root (Filename.basename root) |> of_tree_seq root)
+        |> Seq.flat_map (fun root -> tree_seq_of_path root root)
         |> of_tree_seq "[root]"
 
   end
