@@ -15,6 +15,7 @@ open Printf
 let _ =
   Log.color_on();
   Log.set_log_level Log.DEBUG;
+  Log.set_prefix " 0pen";
   Random.self_init ()
 
 
