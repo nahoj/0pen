@@ -45,6 +45,16 @@ module Utils = struct
       else
         parts
 
+    (* IMG_1234[tag1 tag2].JPG *)
+    let file_tags_regexp = Str.regexp "[^[]*\\[\\([^]]*\\)\\].*"
+
+    let file_tags file_path =
+      let file_name = Filename.basename file_path in
+      if Str.string_match file_tags_regexp file_name 0 then
+        Str.matched_group 1 file_name |> String.split_on_char ' '
+      else
+        []
+
     (* Get inode number of file `f`. Dereferences symlinks. *)
     let ino f : int =
       Unix.((stat f).st_ino)
@@ -82,7 +92,7 @@ module Utils = struct
 
     let push lr x =
       lr := x :: !lr
-  
+
     let pop lr =
       let res = List.hd !lr in
       lr := List.tl !lr;
@@ -94,17 +104,17 @@ module Utils = struct
   module Seqs = struct
 
     exception End_of_seq
-  
+
     let pop seq_ref =
       match Seq.uncons !seq_ref with
       | None -> raise End_of_seq
       | Some (x, xs) ->
           seq_ref := xs;
           x
-  
+
     let float_sum s =
       Seq.fold_left (fun accu x -> accu + Floats.intify x) 0 s |> Floats.deintify
-  
+
     let int_sum s =
       Seq.fold_left (fun accu x -> accu + x) 0 s
 
@@ -237,6 +247,13 @@ module Utils = struct
             !i = !j
           end
     end
+  end
+
+  module Time = struct
+    let string_of_tm tm =
+      let open Unix in
+      Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
+        (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday tm.tm_hour tm.tm_min tm.tm_sec
   end
 end
 
@@ -453,29 +470,28 @@ module FileTree = struct
   module OfFileSystem = struct
 
     let rec tree_seq_of_path full_path tree_name =
-      if Sys.is_directory full_path then
-        let child_names =
-          try
-          	Sys.readdir full_path
-          with Sys_error msg ->
-            Log.warn "Sys_error: %s" msg;
-            [||]
-        in
-        let trees =
-          child_names
-            |> Array.to_seq
-            |> Seq.filter (fun child_name -> not (file_is_ignored child_name))
-            |> Seq.flat_map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
-        in
-        if path_should_be_flattened full_path then
-          trees
-        else
-          Seq.return (of_tree_seq tree_name trees)
+      try
+        if Sys.is_directory full_path then
+          let child_names = Sys.readdir full_path in
+          let trees =
+            child_names
+              |> Array.to_seq
+              |> Seq.filter (fun child_name -> not (file_is_ignored child_name))
+              |> Seq.flat_map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
+          in
+          if path_should_be_flattened full_path then
+            trees
+          else
+            Seq.return (of_tree_seq tree_name trees)
 
-      else
-        Seq.return
-          (File { name = tree_name; name_key = lazy (Strings.FileManagerSort.key tree_name); path = full_path;
-            weight = 1. })
+        else
+          Seq.return
+            (File { name = tree_name; name_key = lazy (Strings.FileManagerSort.key tree_name); path = full_path;
+              weight = 1. })
+
+      with Sys_error msg ->
+        Log.warn "Sys_error: %s" msg;
+        Seq.empty
 
     let build roots =
       roots
@@ -493,14 +509,33 @@ module FileTree = struct
 
     let file_timestamp_half_life_days = ref 0.
 
-    let file_creation_and_modification_timestamps path =
-      let command = [| "/usr/bin/stat"; "-c"; "%W,%Y"; path |] in
-      let channel = Unix.open_process_args_in command.(0) command in
-      let output = input_line channel in
-      ignore (Unix.close_process_in channel);
-      match String.split_on_char ',' output with
-      | [creation; modification] -> float_of_string creation, float_of_string modification
-      | _ -> failwith ("Invalid stat output: " ^ output)
+    let tag_date_regex =
+      Str.regexp "[^0-9]*\\([0-9][0-9][0-9][0-9]\\)[^0-9]*\\(\\([0-9][0-9]\\)[^0-9]*\\([0-9][0-9]\\)?\\)?.*"
+
+    let time0 = { (Unix.gmtime 0.) with tm_hour = 12 }
+    let one_day_ago = Unix.gettimeofday () -. 86400.
+
+    let latest_date_tag file_path : float =
+      let open Str in
+      let open Unix in
+      let dates =
+        Files.file_tags file_path
+        |> List.to_seq
+        |> Seq.filter_map (fun tag ->
+          if string_match tag_date_regex tag 0 then
+            let year = int_of_string (matched_group 1 tag) in
+            let month = try int_of_string (matched_group 3 tag) with Not_found -> 7 in
+            let day = try int_of_string (matched_group 4 tag) with Not_found -> 15 in
+            Some (mktime { time0 with tm_year = year - 1900; tm_mon = month - 1; tm_mday = day } |> fst)
+          else
+            None
+        )
+      in
+      if Seq.is_empty dates then begin
+(*        Log.debug "No date tag in %s" file_path; *)
+        one_day_ago
+      end else
+        Seq.fold_left max 0. dates
 
     let halflife_weight half_life_seconds timestamp =
       let decay_rate = Stdlib.log 2. /. half_life_seconds in
@@ -510,9 +545,8 @@ module FileTree = struct
       if !file_timestamp_half_life_days = 0. then
         1.
       else
-        (* Get whichever is latest between creation and modification timestamp, in seconds *)
-        let creation_time, modification_time = file_creation_and_modification_timestamps path in
-        halflife_weight (!file_timestamp_half_life_days *. 86400.) (max creation_time modification_time)
+        let tag_time = latest_date_tag path in
+        halflife_weight (!file_timestamp_half_life_days *. 86400.) tag_time
 
     let tree_weigh weight_list tree =
       if weight_list = [] then
