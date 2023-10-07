@@ -14,7 +14,7 @@ Ex: 0pen -m toto -f toto/africa.ogg
   --raw             Read all files once without ordering or shuffling them
   -r                
   --shuffle         (default) Shuffle all files then loop through them
-  --half-life DAYS  (float) Decrease file weight since creation/modification (default = 0. = don't)
+  --half-life DAYS  (float) Decrease file weight based on name-tag date (default = 0. = don't)
   --series N        Max length of a number series (default = 1)
 
   --list            Print a list of files, don't open them or interact

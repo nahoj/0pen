@@ -921,7 +921,7 @@ module Params = struct
     ["--shuffle"], Unit (fun () -> order := Shuffle), " (default) Shuffle all files then loop through them";
     ["--half-life"],
       Float (fun half_life -> make_order_pick (); FileTree.Postproc.file_timestamp_half_life_days := half_life),
-      "DAYS (float) Decrease file weight since creation/modification (default = 0. = don't)";
+      "DAYS (float) Decrease file weight based on name-tag date (default = 0. = don't)";
     ["--series"], Int (fun n -> make_order_pick (); Selection.max_series_length := n),
       "N Max length of a number series (default = 1)\n";
 
