@@ -161,7 +161,7 @@ module Utils = struct
 
       let key_part_to_string = function
       | Low s | High s -> s
-      | Int n -> string_of_int n
+      | Int n -> assert false
 
       let filename_maybe_tag_group_regexp = Str.regexp ("^\\([^[]*\\)" ^ "\\([[][^]]*[]]\\)?" ^ "\\(.*\\)$")
       let remove_tag_group file_name =
@@ -181,7 +181,7 @@ module Utils = struct
         |> List.to_seq
         |> Seq.map (function
           | Delim digits when String.length digits <= 18 -> Int (int_of_string digits)
-          | Delim text
+          | Delim digits -> Int (int_of_string (String.sub digits 0 18))
           | Text text ->
             assert (text <> "");
             if Char.code text.[0] < 0x30 then Low text else High text
@@ -238,6 +238,7 @@ module Utils = struct
               !i < !j &&
                 match k1.(!i), k2.(!i) with
                 | Int _, Int _ -> true
+                | Int _, _ | _, Int _ -> false
                 | part1, part2 ->
                   let s1 = key_part_to_string part1 and s2 = key_part_to_string part2 in
                   s1 = s2 && Str.string_match number_separator_regexp s1 0
@@ -479,7 +480,7 @@ module FileTree = struct
               |> Seq.filter (fun child_name -> not (file_is_ignored child_name))
               |> Seq.flat_map (fun child_name -> tree_seq_of_path (Filename.concat full_path child_name) child_name)
           in
-          if path_should_be_flattened full_path then
+          if path_should_be_flattened tree_name then (* tree_name contains '/' only for a root *)
             trees
           else
             Seq.return (of_tree_seq tree_name trees)
@@ -507,6 +508,7 @@ module FileTree = struct
 
   module Postproc = struct
 
+    let file_timestamp_half_life_t0 = ref (Unix.gettimeofday ())
     let file_timestamp_half_life_days = ref 0.
 
     let tag_date_regex =
@@ -515,21 +517,22 @@ module FileTree = struct
     let time0 = { (Unix.gmtime 0.) with tm_hour = 12 }
     let one_day_ago = Unix.gettimeofday () -. 86400.
 
-    let latest_date_tag file_path : float =
+    let time_of_tag tag =
       let open Str in
       let open Unix in
+      if string_match tag_date_regex tag 0 then
+        let year = int_of_string (matched_group 1 tag) in
+        let month = try int_of_string (matched_group 3 tag) with Not_found -> 7 in
+        let day = try int_of_string (matched_group 4 tag) with Not_found -> 15 in
+        Some (mktime { time0 with tm_year = year - 1900; tm_mon = month - 1; tm_mday = day } |> fst)
+      else
+        None
+
+    let latest_date_tag file_path : float =
       let dates =
         Files.file_tags file_path
         |> List.to_seq
-        |> Seq.filter_map (fun tag ->
-          if string_match tag_date_regex tag 0 then
-            let year = int_of_string (matched_group 1 tag) in
-            let month = try int_of_string (matched_group 3 tag) with Not_found -> 7 in
-            let day = try int_of_string (matched_group 4 tag) with Not_found -> 15 in
-            Some (mktime { time0 with tm_year = year - 1900; tm_mon = month - 1; tm_mday = day } |> fst)
-          else
-            None
-        )
+        |> Seq.filter_map time_of_tag
       in
       if Seq.is_empty dates then begin
 (*        Log.debug "No date tag in %s" file_path; *)
@@ -539,7 +542,7 @@ module FileTree = struct
 
     let halflife_weight half_life_seconds timestamp =
       let decay_rate = Stdlib.log 2. /. half_life_seconds in
-      exp (-. decay_rate *. (Unix.gettimeofday () -. timestamp))
+      exp (-. decay_rate *. Float.abs (!file_timestamp_half_life_t0 -. timestamp))
 
     let file_weight path =
       if !file_timestamp_half_life_days = 0. then
@@ -906,6 +909,22 @@ module Params = struct
     | Pick _ -> ()
     | _ -> order := PickModes.parse ""
 
+  let handle_half_life_opt arg =
+    make_order_pick ();
+    match String.rindex_opt arg ':' with
+    | Some idx ->
+      begin match FileTree.Postproc.time_of_tag (String.sub arg 0 idx) with
+      | Some t0 ->
+        FileTree.Postproc.file_timestamp_half_life_t0 := t0;
+        FileTree.Postproc.file_timestamp_half_life_days :=
+          float_of_string (String.sub arg (idx + 1) (String.length arg - idx - 1))
+      | None ->
+        crash ("Invalid date in half-life option: " ^ arg)
+      end
+    | None ->
+      FileTree.Postproc.file_timestamp_half_life_t0 := Unix.gettimeofday ();
+      FileTree.Postproc.file_timestamp_half_life_days := float_of_string arg
+
   let myspeclist =
     let open Arg in
   [
@@ -919,9 +938,8 @@ module Params = struct
     ["--pick"; "-p"], String (fun s -> order := PickModes.parse s), "MODE Pick files according to the given pick mode";
     ["--raw"; "-r"], Unit (fun () -> order := Raw), " Read all files once without ordering or shuffling them";
     ["--shuffle"], Unit (fun () -> order := Shuffle), " (default) Shuffle all files then loop through them";
-    ["--half-life"],
-      Float (fun half_life -> make_order_pick (); FileTree.Postproc.file_timestamp_half_life_days := half_life),
-      "DAYS (float) Decrease file weight based on name-tag date (default = 0. = don't)";
+    ["--half-life"], String handle_half_life_opt,
+      "[DATE:]DAYS (ISO date:float) Decrease file weight based on name-tag date (default = 0. = don't, default date = now)";
     ["--series"], Int (fun n -> make_order_pick (); Selection.max_series_length := n),
       "N Max length of a number series (default = 1)\n";
 
