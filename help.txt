@@ -21,7 +21,8 @@ Ex: 0pen -m toto -f toto/africa.ogg
   -l                      
   --command string        Command with which to open files
   -c                      
-  --mplayer               (default)
+  --mplayer               
+  --mpv                   (default)
   --vlc                   
   --xdg                   (xdg-open)
   --break DELAY           Delay to interact between playing two files, in seconds (default = 0.7)
@@ -30,6 +31,7 @@ Ex: 0pen -m toto -f toto/africa.ogg
   -m                      
   --not-music             Don't do that (default = follow main file type)
   -M                      
-  -V                      Shift video colors (MPlayer only)
+  --mirror                Mirror video (MPV only)
+  -V                      Shift video colors (MPlayer and MPV only)
   -help                   Display this list of options
   --help                  Display this list of options

@@ -900,8 +900,9 @@ module Params = struct
   let order = ref Shuffle
 
   let break_delay = ref 0.7 (* float, in seconds *)
-  let command = ref `MPlayer
+  let command = ref `MPV
   let list_mode = ref false
+  let mirror_mode = ref false
   let v_mode = ref false
 
   let make_order_pick () =
@@ -945,7 +946,8 @@ module Params = struct
 
     ["--list"; "-l"], Set list_mode, " Print a list of files, don't open them or interact";
     ["--command"; "-c"], String (fun s -> command := `Custom s), "string Command with which to open files";
-    ["--mplayer"], Unit (fun () -> command := `MPlayer), " (default)";
+    ["--mplayer"], Unit (fun () -> command := `MPlayer), " ";
+    ["--mpv"], Unit (fun () -> command := `MPV), " (default)";
     ["--vlc"], Unit (fun () -> command := `VLC), " ";
     ["--xdg"], Unit (fun () -> command := `XDG), " (xdg-open)";
     ["--break"; "-b"], Set_float break_delay,
@@ -954,7 +956,8 @@ module Params = struct
       " Only play audio even for video files (MPlayer only)";
     ["--not-music"; "-M"], Unit (fun () -> FileTypes.mode_music := Some false),
       " Don't do that (default = follow main file type)";
-    ["-V"], Set v_mode, " Shift video colors (MPlayer only)"
+    ["--mirror"], Set mirror_mode, " Mirror video (MPV only)";
+    ["-V"], Set v_mode, " Shift video colors (MPlayer and MPV only)"
   ]
 
   let speclist =
@@ -1028,9 +1031,6 @@ module Play = struct
       if vid then begin (* vid-only options *)
         if fs then
           Lists.push args "-fs";
-        if mirror then
-          (* Buggy output in mplayer and can't find a CLI parameter that does anything for VLC *)
-          Lists.push args "-vf mirror -af channels=2:2:0:1:1:0";
         (let sub = if sub <> [] then sub else subs_of_video file in
          if sub <> [] then
            let l = List.map (fun f -> Filename.quote (escape_subfile f)) sub in
@@ -1041,6 +1041,25 @@ module Play = struct
         Lists.push args "-vo null"
       end;
       Lists.push args "mplayer 2>/dev/null";
+      if use_playtag then
+        Lists.push args "playtag";
+      command (String.concat " " !args) [file]
+
+
+    let mpv ?(fs = true) ?(mirror = false) ?(vid = true) ?(v_mode = false) file =
+      let args = ref [] in
+      Lists.push args ("--msg-level=all=fatal" ^ (if vid then "" else ",statusline=status"));
+      if vid then begin (* vid-only options *)
+        if fs then
+          Lists.push args "--fs";
+        if mirror then
+          Lists.push args "--vf-add=hflip --hwdec=no --af=lavfi=[pan='stereo|c0=c1|c1=c0']";
+        if v_mode then
+          Lists.push args "--vf-add=hue=-160 --hwdec=no";
+      end else begin
+        Lists.push args "-vo null"
+      end;
+      Lists.push args "mpv";
       if use_playtag then
         Lists.push args "playtag";
       command (String.concat " " !args) [file]
@@ -1068,6 +1087,7 @@ module Play = struct
     let player command ?(fs = true) ?(mirror = false) ?(sub = []) ?(vid = true) ?(v_mode = false) file =
       match command with
         | `MPlayer -> mplayer ~fs ~mirror ~sub ~vid ~v_mode file
+        | `MPV -> mpv ~fs ~mirror ~vid ~v_mode file
         | `VLC -> vlc ~fs file
         | `XDG -> xdg file
         | `Custom c -> custom_player c file
@@ -1134,13 +1154,13 @@ module Play = struct
   (* === Playing === *)
 
   let play_candidate () =
-    let choose_mirror () =
-      false && (not (Selection.order_is_random !Params.order) || Random.bool ())
+    let choose_mirror =
+     !Params.mirror_mode && (not (Selection.order_is_random !Params.order) || Random.bool ())
     in
     let v_mode = !Params.v_mode && (not (Selection.order_is_random !Params.order) || Random.bool ()) in
     if !history_pointer <> 0 then
       print_newline ();
-    ignore (Players.player !Params.command ~mirror:(choose_mirror ())
+    ignore (Players.player !Params.command ~mirror:(choose_mirror)
               ~vid:(!FileTypes.mode_music = Some false)  ~v_mode:v_mode  !candidate )
 
 
