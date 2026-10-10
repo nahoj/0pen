@@ -592,7 +592,7 @@ module FileTypes = struct
   let subtitles_extensions =
     [| "ass"; "smi"; "srt"; "ssa"; "sub"; "sup"; "vtt" |]
   let noise_extensions =
-    Array.append subtitles_extensions [| "exe"; "idx" |]
+    Array.append subtitles_extensions [| "exe"; "idx"; "json"; "md"; "py" |]
 
   let file_extension f =
     let dot_ext = Filename.extension f in
@@ -1060,8 +1060,6 @@ module Play = struct
         Lists.push args "-vo null"
       end;
       Lists.push args "mpv";
-      if use_playtag then
-        Lists.push args "playtag";
       command (String.concat " " !args) [file]
 
 
